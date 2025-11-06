@@ -32,11 +32,12 @@ STEP 2: Setup BACKEND
 
 2.5 Setup Database - Run this command 
 
-- python -c "from app import db, app; app.app_context().push(); db.create_all(); print('✅ SQLite Database initialized!')"
+- python -c "from app import create_app; app = create_app(); app.app_context().push(); from app.extensions import db; db.create_all(); print('✅ SQLite Database initialized!')"
 
 2.6 Run Backend Server
 
 - python run.py
+
 
 
 
