@@ -34,9 +34,10 @@ STEP 2: Setup BACKEND
 
 - python -c "from app import db, app; app.app_context().push(); db.create_all(); print('✅ SQLite Database initialized!')"
 
-2.5 Run Backend Server
+2.6 Run Backend Server
 
 - python run.py
+
 
 
 
