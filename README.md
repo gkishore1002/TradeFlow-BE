@@ -28,11 +28,16 @@ STEP 2: Setup BACKEND
 
 2.4 Create .env File
 
-- Add the .env content  
+- Add the .env content
+
+2.5 Setup Database - Run this command 
+
+- python -c "from app import db, app; app.app_context().push(); db.create_all(); print('✅ SQLite Database initialized!')"
 
 2.5 Run Backend Server
 
 - python run.py
+
 
 
 
