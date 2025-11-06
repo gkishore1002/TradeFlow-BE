@@ -13,9 +13,9 @@ STEP 1: Clone the Repository
 
 STEP 2: Setup BACKEND
 
-2.1 Navigate to Backend Folder
+2.1 Navigate to Project Folder
 
-- cd backend
+- cd project_folder_name
 
 2.2 Create Virtual Environment
 
@@ -33,6 +33,7 @@ STEP 2: Setup BACKEND
 2.5 Run Backend Server
 
 - python run.py
+
 
 
 
