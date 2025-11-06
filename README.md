@@ -32,6 +32,7 @@ STEP 2: Setup BACKEND
 
 2.5 Run Backend Server
 
-- python app.py
+- python run.py
+
 
 
