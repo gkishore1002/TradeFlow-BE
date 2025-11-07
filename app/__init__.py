@@ -9,11 +9,19 @@ import os
 # Cloudinary
 import cloudinary as cld
 
+
 def create_app(config_object=Config):
     app = Flask(__name__)
     app.config.from_object(config_object)
 
-    # Cloudinary config: prefer environment variables
+    # Get the absolute path to project root
+    basedir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+
+    # Create instance folder if it doesn't exist
+    instance_path = os.path.join(basedir, 'instance')
+    os.makedirs(instance_path, exist_ok=True)
+
+    # Cloudinary config
     cld.config(
         cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
         api_key=os.getenv("CLOUDINARY_API_KEY"),
@@ -21,10 +29,12 @@ def create_app(config_object=Config):
         secure=True
     )
 
-    # Ensure upload folder exists (kept for non-image assets if any)
+    # Ensure upload folder exists - use absolute path
     upload_folder = app.config.get('UPLOAD_FOLDER', 'uploads')
+    if not os.path.isabs(upload_folder):
+        upload_folder = os.path.join(basedir, upload_folder)
     os.makedirs(upload_folder, exist_ok=True)
-    print(f"Upload folder created/verified at: {upload_folder}")
+    print(f"📁 Upload folder created/verified at: {upload_folder}")
 
     # Initialize extensions
     db.init_app(app)
@@ -33,7 +43,11 @@ def create_app(config_object=Config):
     jwt.init_app(app)
     bcrypt.init_app(app)
 
-    # CORS for local frontend (adjust as needed)
+    # IMPORTANT: Import models here so they're registered with SQLAlchemy
+    with app.app_context():
+        from . import models  # This imports all your models
+
+    # CORS configuration
     CORS(app,
          origins=["http://localhost:3000", "http://127.0.0.1:3000"],
          supports_credentials=True,
@@ -49,7 +63,8 @@ def create_app(config_object=Config):
     def health():
         return {
             'status': 'ok',
-            'upload_folder': app.config.get('UPLOAD_FOLDER'),
+            'database': app.config.get('SQLALCHEMY_DATABASE_URI'),
+            'upload_folder': upload_folder,
             'max_content_length': app.config.get('MAX_CONTENT_LENGTH'),
             'environment': 'development' if app.debug else 'production'
         }, 200
@@ -70,7 +85,7 @@ def create_app(config_object=Config):
     def too_large(e):
         return {
             'error': 'File too large',
-            'message': f'Maximum file size is {app.config.get("MAX_CONTENT_LENGTH", 16*1024*1024)} bytes'
+            'message': f'Maximum file size is {app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)} bytes'
         }, 413
 
     @app.errorhandler(400)
@@ -89,6 +104,7 @@ def create_app(config_object=Config):
 
     if app.debug:
         print("🚀 Flask app created in DEBUG mode")
+        print(f"💾 Database: {app.config.get('SQLALCHEMY_DATABASE_URI')}")
         print(f"📁 Upload folder: {upload_folder}")
         print(f"📊 Max file size: {app.config.get('MAX_CONTENT_LENGTH', 'Not set')}")
         print(f"🌐 CORS origins: http://localhost:3000")

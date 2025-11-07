@@ -1,13 +1,19 @@
 import os
 from datetime import timedelta
 
+# Get the PROJECT ROOT directory (one level up from config.py which is in app/)
+basedir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+
 class Config:
-    # Database
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///tradeflow.db')
+    # Database - using absolute path at PROJECT ROOT
+    SQLALCHEMY_DATABASE_URI = os.getenv(
+        'DATABASE_URL',
+        'sqlite:///' + os.path.join(basedir, 'instance', 'tradeflow.db')
+    )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # Upload folder
-    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
+    # Upload folder - use absolute path
+    UPLOAD_FOLDER = os.path.join(basedir, os.getenv('UPLOAD_FOLDER', 'uploads'))
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max
 
     # JWT Configuration
