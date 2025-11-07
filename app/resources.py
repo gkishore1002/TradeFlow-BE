@@ -1,3 +1,4 @@
+# resources/resources.py
 import re
 from flask import request
 from flask_restful import Resource
@@ -46,7 +47,7 @@ def cloudinary_upload_image(file_storage, user_id, folder="upload"):
         return None
 
 
-def compute_pnl(entry_price, exit_price, quantity, trade_type):
+def compute_pnl(entry_price, exit_price, quantity, trade_type="Long"):
     """Calculate Profit/Loss"""
     try:
         if entry_price is None or exit_price is None or quantity is None:
@@ -58,7 +59,7 @@ def compute_pnl(entry_price, exit_price, quantity, trade_type):
             return (ext - ent) * qty
         elif trade_type == "Short":
             return (ent - ext) * qty
-        return None
+        return (ext - ent) * qty
     except Exception:
         return None
 
@@ -97,19 +98,14 @@ def extract_request_data():
     """
     FIXED: Extract data from either FormData or JSON
     Handles both multipart/form-data and application/json
-    Safely handles cases where Content-Type is multipart but no files
     """
     has_files = bool(request.files.getlist('images'))
-
-    # Check Content-Type header
     content_type = request.content_type or ''
 
     if 'multipart/form-data' in content_type:
-        # FormData submission (even without images)
         data = {k: v for k, v in request.form.items()}
         print(f"📦 Extracted FormData: {len(data)} fields, Files: {len(request.files)}")
     elif 'application/json' in content_type:
-        # JSON submission
         try:
             data = request.get_json() or {}
             print(f"📦 Extracted JSON: {len(data)} fields")
@@ -117,7 +113,6 @@ def extract_request_data():
             print(f"⚠️ JSON parsing failed: {str(e)}")
             data = {}
     else:
-        # Fallback: try JSON first, then FormData
         try:
             data = request.get_json() or {}
             print(f"📦 Extracted JSON (fallback): {len(data)} fields")
@@ -141,14 +136,11 @@ def parse_datetime(date_str):
 
     if isinstance(date_str, str):
         try:
-            # Handle ISO format with timezone
             if 'T' in date_str:
-                # Remove 'Z' and milliseconds if present
                 date_str = date_str.replace('Z', '').split('.')[0]
                 return datetime.fromisoformat(date_str)
             else:
-                # Simple date format YYYY-MM-DD
-                return datetime.strptime(date_str, '%Y-%m-%d').date()
+                return datetime.strptime(date_str, '%Y-%m-%d')
         except Exception as e:
             print(f"⚠️ Date parsing failed for '{date_str}': {str(e)}")
             return None
@@ -620,7 +612,7 @@ class TradeListResource(Resource):
                     processed_data[key] = float(value) if value else None
                 elif key in ['quantity', 'strategy_id']:
                     processed_data[key] = int(value) if value else None
-                elif key in ['entry_date', 'exit_date']:
+                elif key in ['entry_time', 'exit_time']:
                     processed_data[key] = parse_datetime(value)
                 else:
                     processed_data[key] = value
@@ -696,7 +688,7 @@ class TradeResource(Resource):
                     value = float(value) if value else None
                 elif key in ['quantity', 'strategy_id']:
                     value = int(value) if value else None
-                elif key in ['entry_date', 'exit_date']:
+                elif key in ['entry_time', 'exit_time']:
                     value = parse_datetime(value)
 
                 if hasattr(t, key) and key not in ['id', 'user_id', 'created_at']:
@@ -732,7 +724,7 @@ class TradeResource(Resource):
 
 
 # ========================
-# TRADE LOG RESOURCES
+# TRADE LOG RESOURCES (FIXED)
 # ========================
 
 class TradeLogListResource(Resource):
@@ -770,11 +762,15 @@ class TradeLogListResource(Resource):
 
     @jwt_required()
     def post(self):
+        """
+        FIXED: Create TradeLog using only TradeLog model
+        NOT creating Trade object automatically
+        """
         user_id = int(get_jwt_identity())
         try:
             data, has_files = extract_request_data()
-            data["user_id"] = user_id
 
+            # Upload images
             uploaded_files = request.files.getlist('images') if has_files else []
             urls = []
             for f in uploaded_files:
@@ -783,6 +779,7 @@ class TradeLogListResource(Resource):
                     if url:
                         urls.append(url)
 
+            # Process data types
             processed_data = {}
             for key, value in data.items():
                 if key in ['entry_price', 'exit_price']:
@@ -794,52 +791,39 @@ class TradeLogListResource(Resource):
                 else:
                     processed_data[key] = value
 
-            required_fields = ['symbol', 'entry_price', 'exit_price', 'quantity']
+            processed_data["user_id"] = user_id
+
+            # Validation
+            required_fields = ['symbol', 'entry_price', 'exit_price', 'quantity', 'entry_date', 'exit_date']
             for field in required_fields:
                 if not processed_data.get(field):
                     return {"error": f"Missing required field: {field}"}, 400
 
             print(f"📝 Creating Trade Log: {processed_data.get('symbol')}, Files: {len(urls)}")
 
+            # FIXED: Create ONLY TradeLog, not Trade
             tl = trade_log_schema.load(processed_data)
             if urls:
                 tl.images = urls
 
-            trade_type = data.get("trade_type", "Long")
-
-            trade = Trade(
-                user_id=user_id,
-                strategy_id=getattr(tl, "strategy_id", None),
-                symbol=tl.symbol,
-                entry_price=tl.entry_price,
-                exit_price=tl.exit_price,
-                quantity=tl.quantity,
-                trade_type=trade_type,
-                strategy_used=getattr(tl, "trading_strategy", None),
-                entry_reason=getattr(tl, "trade_notes", "") or "",
-                exit_reason="",
-                images=urls if urls else [],
-                entry_date=getattr(tl, "entry_date", None),
-                exit_date=getattr(tl, "exit_date", None),
-            )
-            trade.profit_loss = compute_pnl(trade.entry_price, trade.exit_price, trade.quantity, trade.trade_type)
-
-            db.session.add(trade)
-            db.session.flush()
-
-            tl.trade_id = trade.id
-            tl.profit_loss = compute_pnl(tl.entry_price, tl.exit_price, tl.quantity, trade_type)
+            # Calculate P&L
+            tl.profit_loss = compute_pnl(tl.entry_price, tl.exit_price, tl.quantity, "Long")
 
             db.session.add(tl)
             db.session.commit()
+
+            print(f"✅ Trade Log Created: ID {tl.id}")
 
             result = trade_log_schema.dump(tl)
             images = result.get('images') or []
             result['image_urls'] = images
             return result, 201
+
         except Exception as e:
             db.session.rollback()
             print(f"❌ Error creating trade log: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {"error": f"Failed to create trade log: {str(e)}"}, 400
 
 
@@ -860,19 +844,20 @@ class TradeLogResource(Resource):
 
     @jwt_required()
     def put(self, log_id):
+        """
+        FIXED: Update TradeLog with proper date parsing
+        """
         user_id = int(get_jwt_identity())
         try:
             tl = TradeLog.query.filter_by(id=log_id, user_id=user_id).first()
             if not tl:
                 return {"error": "Trade log not found"}, 404
 
-            # FIXED: Use helper function to extract data from FormData or JSON
             data, has_files = extract_request_data()
 
             print(f"📝 Updating Trade Log: ID={log_id}, Has Files: {has_files}")
-            print(f"📋 Content-Type: {request.content_type}")
 
-            # Handle new image uploads if files present
+            # Handle image uploads
             if has_files:
                 uploaded_files = request.files.getlist('images')
                 urls = []
@@ -892,63 +877,36 @@ class TradeLogResource(Resource):
             data.pop('created_at', None)
 
             # Convert data types and parse dates
-            trade_type = data.get("trade_type", None)
             processed_data = {}
-
             for key, value in data.items():
                 if key in ['entry_price', 'exit_price']:
                     processed_data[key] = float(value) if value else None
                 elif key == 'quantity':
                     processed_data[key] = int(value) if value else None
                 elif key in ['entry_date', 'exit_date']:
-                    # FIXED: Parse ISO datetime strings to Python datetime objects
                     processed_data[key] = parse_datetime(value)
                     print(f"   ✓ Parsed {key}: {value} -> {processed_data[key]}")
                 else:
                     processed_data[key] = value
 
-            # Update trade log fields
+            # Update fields
             for k, v in processed_data.items():
                 if hasattr(tl, k) and k not in ['id', 'user_id', 'created_at']:
                     setattr(tl, k, v)
                     print(f"   ✓ Set {k}: {v}")
 
-            # Calculate P&L for trade log
-            if trade_type is None and tl.trade_id:
-                linked_trade = Trade.query.get(tl.trade_id)
-                trade_type = linked_trade.trade_type if linked_trade else "Long"
-
-            tl.profit_loss = compute_pnl(tl.entry_price, tl.exit_price, tl.quantity, trade_type or "Long")
+            # Calculate P&L
+            tl.profit_loss = compute_pnl(tl.entry_price, tl.exit_price, tl.quantity, "Long")
             print(f"💰 Trade Log P&L calculated: {tl.profit_loss}")
 
             db.session.commit()
             print(f"✅ Trade Log updated successfully: ID={log_id}")
 
-            # Update linked trade if it exists
-            if tl.trade_id:
-                t = Trade.query.filter_by(id=tl.trade_id, user_id=user_id).first()
-                if t:
-                    print(f"📌 Updating linked Trade: ID={tl.trade_id}")
-                    t.symbol = tl.symbol
-                    t.entry_price = tl.entry_price
-                    t.exit_price = tl.exit_price
-                    t.quantity = tl.quantity
-                    if trade_type is not None:
-                        t.trade_type = trade_type
-                    if tl.images:
-                        t.images = tl.images
-                    if hasattr(tl, 'entry_date') and tl.entry_date:
-                        t.entry_date = tl.entry_date
-                    if hasattr(tl, 'exit_date') and tl.exit_date:
-                        t.exit_date = tl.exit_date
-                    t.profit_loss = compute_pnl(t.entry_price, t.exit_price, t.quantity, t.trade_type)
-                    db.session.commit()
-                    print(f"   ✓ Trade updated with P&L: {t.profit_loss}")
-
             result = trade_log_schema.dump(tl)
             images = result.get('images') or []
             result['image_urls'] = images
             return result
+
         except Exception as e:
             db.session.rollback()
             print(f"❌ Error updating trade log: {str(e)}")
@@ -963,11 +921,6 @@ class TradeLogResource(Resource):
             tl = TradeLog.query.filter_by(id=log_id, user_id=user_id).first()
             if not tl:
                 return {"error": "Trade log not found"}, 404
-
-            if tl.trade_id:
-                linked_trade = Trade.query.filter_by(id=tl.trade_id, user_id=user_id).first()
-                if linked_trade:
-                    db.session.delete(linked_trade)
 
             db.session.delete(tl)
             db.session.commit()
@@ -1141,7 +1094,7 @@ def register_resources(api):
     api.add_resource(TradeListResource, '/api/trades')
     api.add_resource(TradeResource, '/api/trades/<int:trade_id>')
 
-    # Trade Logs
+    # Trade Logs - FIXED
     api.add_resource(TradeLogListResource, '/api/trade-logs')
     api.add_resource(TradeLogResource, '/api/trade-logs/<int:log_id>')
     api.add_resource(TradeLogStatsResource, '/api/trade-logs/stats')
