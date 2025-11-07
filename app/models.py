@@ -40,7 +40,7 @@ class User(db.Model, TimestampMixin):
 
 
 # ---------------------------
-# Strategy Model
+# Strategy Model - WITH IMAGES
 # ---------------------------
 class Strategy(db.Model, TimestampMixin):
     __tablename__ = 'strategies'
@@ -66,6 +66,9 @@ class Strategy(db.Model, TimestampMixin):
     trading_rules = db.Column(db.Text)
     additional_notes = db.Column(db.Text)
 
+    # Multiple images for strategy documentation
+    images = db.Column(JSON, default=[], nullable=False, server_default='[]')  # Array of image URLs
+
     # Relationships
     analyses = db.relationship('Analysis', backref='strategy', lazy=True, cascade="all, delete-orphan")
     trades = db.relationship('Trade', backref='strategy', lazy=True, cascade="all, delete-orphan")
@@ -75,7 +78,7 @@ class Strategy(db.Model, TimestampMixin):
 
 
 # ---------------------------
-# Analysis Model
+# Analysis Model - WITH IMAGES
 # ---------------------------
 class Analysis(db.Model, TimestampMixin):
     __tablename__ = 'analyses'
@@ -108,12 +111,16 @@ class Analysis(db.Model, TimestampMixin):
     fundamental_analysis = db.Column(db.Text)
     additional_notes = db.Column(db.Text)
 
+    # Multiple images for technical/fundamental analysis charts
+    images = db.Column(JSON, default=[], nullable=False,
+                       server_default='[]')  # Array of image URLs (charts, patterns, etc.)
+
     def __repr__(self):
         return f'<Analysis {self.symbol}>'
 
 
 # ---------------------------
-# Trade Model
+# Trade Model - WITH IMAGES
 # ---------------------------
 class Trade(db.Model, TimestampMixin):
     __tablename__ = 'trades'
@@ -139,7 +146,10 @@ class Trade(db.Model, TimestampMixin):
     tags = db.Column(db.Text)
     profit_loss = db.Column(db.Float)
     notes = db.Column(db.Text)
-    screenshots = db.Column(JSON, default=[])
+
+    images = db.Column(JSON, default=[], nullable=False,
+                       server_default='[]')  # Array of image URLs (entry/exit charts, evidence, etc.)
+
     entry_time = db.Column(db.DateTime)
     exit_time = db.Column(db.DateTime)
 
@@ -151,10 +161,11 @@ class Trade(db.Model, TimestampMixin):
 
 
 # ---------------------------
-# TradeLog Model
+# TradeLog Model - WITH IMAGES
 # ---------------------------
 class TradeLog(db.Model, TimestampMixin):
     __tablename__ = 'trade_logs'
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     trade_id = db.Column(db.Integer, db.ForeignKey('trades.id'), nullable=True)
@@ -168,7 +179,10 @@ class TradeLog(db.Model, TimestampMixin):
     trading_strategy = db.Column(db.String(128))
     trade_notes = db.Column(db.Text)
     profit_loss = db.Column(db.Float)
-    screenshots = db.Column(JSON, nullable=False, server_default='[]')
+
+    images = db.Column(JSON, default=[], nullable=False,
+                       server_default='[]')  # Array of image URLs (trade evidence, charts, etc.)
+
     strategy_id = db.Column(db.Integer, db.ForeignKey('strategies.id'), nullable=True)
 
     # Relationships:

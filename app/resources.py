@@ -1,4 +1,3 @@
-# resources.py
 import re
 from flask import request
 from flask_restful import Resource
@@ -303,7 +302,7 @@ class UserProfileAvatarResource(Resource):
 
 
 # ========================
-# STRATEGY RESOURCES
+# STRATEGY RESOURCES - WITH IMAGE UPLOAD
 # ========================
 
 class StrategyListResource(Resource):
@@ -338,8 +337,22 @@ class StrategyListResource(Resource):
     def post(self):
         user_id = int(get_jwt_identity())
         try:
-            data = request.get_json() or {}
+            has_files = bool(request.files.getlist('images'))
+            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
             data["user_id"] = user_id
+
+            # Handle image uploads
+            uploaded_files = request.files.getlist('images') if has_files else []
+            urls = []
+            for f in uploaded_files:
+                if f and f.filename and allowed_file(f.filename):
+                    url = cloudinary_upload_image(f, user_id, "strategy")
+                    if url:
+                        urls.append(url)
+
+            if urls:
+                data['images'] = urls
+
             s = strategy_schema.load(data)
             db.session.add(s)
             db.session.commit()
@@ -368,7 +381,23 @@ class StrategyResource(Resource):
             s = Strategy.query.filter_by(id=strategy_id, user_id=user_id).first()
             if not s:
                 return {"error": "Strategy not found"}, 404
-            data = request.get_json() or {}
+
+            has_files = bool(request.files.getlist('images'))
+            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+
+            # Handle new image uploads
+            if has_files:
+                uploaded_files = request.files.getlist('images')
+                urls = []
+                for f in uploaded_files:
+                    if f and f.filename and allowed_file(f.filename):
+                        url = cloudinary_upload_image(f, user_id, "strategy")
+                        if url:
+                            urls.append(url)
+                if urls:
+                    existing = s.images or []
+                    data['images'] = existing + urls
+
             data.pop('user_id', None)
             data.pop('id', None)
             for k, v in data.items():
@@ -396,7 +425,7 @@ class StrategyResource(Resource):
 
 
 # ========================
-# ANALYSIS RESOURCES
+# ANALYSIS RESOURCES - WITH IMAGE UPLOAD
 # ========================
 
 class AnalysisListResource(Resource):
@@ -430,8 +459,22 @@ class AnalysisListResource(Resource):
     def post(self):
         user_id = int(get_jwt_identity())
         try:
-            data = request.get_json() or {}
+            has_files = bool(request.files.getlist('images'))
+            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
             data["user_id"] = user_id
+
+            # Handle image uploads
+            uploaded_files = request.files.getlist('images') if has_files else []
+            urls = []
+            for f in uploaded_files:
+                if f and f.filename and allowed_file(f.filename):
+                    url = cloudinary_upload_image(f, user_id, "analysis")
+                    if url:
+                        urls.append(url)
+
+            if urls:
+                data['images'] = urls
+
             a = analysis_schema.load(data)
             db.session.add(a)
             db.session.commit()
@@ -460,7 +503,23 @@ class AnalysisResource(Resource):
             a = Analysis.query.filter_by(id=analysis_id, user_id=user_id).first()
             if not a:
                 return {"error": "Analysis not found"}, 404
-            data = request.get_json() or {}
+
+            has_files = bool(request.files.getlist('images'))
+            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+
+            # Handle new image uploads
+            if has_files:
+                uploaded_files = request.files.getlist('images')
+                urls = []
+                for f in uploaded_files:
+                    if f and f.filename and allowed_file(f.filename):
+                        url = cloudinary_upload_image(f, user_id, "analysis")
+                        if url:
+                            urls.append(url)
+                if urls:
+                    existing = a.images or []
+                    data['images'] = existing + urls
+
             data.pop('user_id', None)
             data.pop('id', None)
             for k, v in data.items():
@@ -488,7 +547,7 @@ class AnalysisResource(Resource):
 
 
 # ========================
-# TRADE RESOURCES
+# TRADE RESOURCES - WITH IMAGE UPLOAD
 # ========================
 
 class TradeListResource(Resource):
@@ -517,8 +576,8 @@ class TradeListResource(Resource):
             result = format_pagination_response(pagination, trades_schema)
 
             for item in result['items']:
-                screenshots = item.get('screenshots') or []
-                item['screenshot_urls'] = screenshots
+                images = item.get('images') or []
+                item['image_urls'] = images
 
             return result
         except Exception as e:
@@ -528,10 +587,11 @@ class TradeListResource(Resource):
     def post(self):
         user_id = int(get_jwt_identity())
         try:
-            has_files = bool(request.files.getlist('screenshots'))
+            has_files = bool(request.files.getlist('images'))
             data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
 
-            uploaded_files = request.files.getlist('screenshots') if request.files else []
+            # Handle image uploads
+            uploaded_files = request.files.getlist('images') if has_files else []
             urls = []
             for f in uploaded_files:
                 if f and f.filename and allowed_file(f.filename):
@@ -539,7 +599,7 @@ class TradeListResource(Resource):
                     if url:
                         urls.append(url)
             if urls:
-                data['screenshots'] = urls
+                data['images'] = urls
 
             processed_data = {}
             for key, value in data.items():
@@ -564,8 +624,8 @@ class TradeListResource(Resource):
             db.session.commit()
 
             result = trade_schema.dump(t)
-            screenshots = result.get('screenshots') or []
-            result['screenshot_urls'] = screenshots
+            images = result.get('images') or []
+            result['image_urls'] = images
             return result, 201
         except Exception as e:
             db.session.rollback()
@@ -581,8 +641,8 @@ class TradeResource(Resource):
             if not t:
                 return {"error": "Trade not found"}, 404
             result = trade_schema.dump(t)
-            screenshots = result.get('screenshots') or []
-            result['screenshot_urls'] = screenshots
+            images = result.get('images') or []
+            result['image_urls'] = images
             return result
         except Exception as e:
             return {"error": f"Failed to fetch trade: {str(e)}"}, 500
@@ -595,11 +655,12 @@ class TradeResource(Resource):
             if not t:
                 return {"error": "Trade not found"}, 404
 
-            has_files = bool(request.files.getlist('screenshots'))
+            has_files = bool(request.files.getlist('images'))
             data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
 
+            # Handle new image uploads
             if has_files:
-                uploaded_files = request.files.getlist('screenshots')
+                uploaded_files = request.files.getlist('images')
                 urls = []
                 for f in uploaded_files:
                     if f and f.filename and allowed_file(f.filename):
@@ -607,8 +668,8 @@ class TradeResource(Resource):
                         if url:
                             urls.append(url)
                 if urls:
-                    existing = t.screenshots or []
-                    data['screenshots'] = existing + urls
+                    existing = t.images or []
+                    data['images'] = existing + urls
 
             data.pop('user_id', None)
             data.pop('id', None)
@@ -625,8 +686,8 @@ class TradeResource(Resource):
             db.session.commit()
 
             result = trade_schema.dump(t)
-            screenshots = result.get('screenshots') or []
-            result['screenshot_urls'] = screenshots
+            images = result.get('images') or []
+            result['image_urls'] = images
             return result
         except Exception as e:
             db.session.rollback()
@@ -648,7 +709,7 @@ class TradeResource(Resource):
 
 
 # ========================
-# TRADE LOG RESOURCES
+# TRADE LOG RESOURCES - WITH IMAGE UPLOAD
 # ========================
 
 class TradeLogListResource(Resource):
@@ -677,8 +738,8 @@ class TradeLogListResource(Resource):
             result = format_pagination_response(pagination, trade_logs_schema)
 
             for item in result['items']:
-                screenshots = item.get('screenshots') or []
-                item['screenshot_urls'] = screenshots
+                images = item.get('images') or []
+                item['image_urls'] = images
 
             return result
         except Exception as e:
@@ -688,11 +749,12 @@ class TradeLogListResource(Resource):
     def post(self):
         user_id = int(get_jwt_identity())
         try:
-            has_files = bool(request.files.getlist('screenshots'))
+            has_files = bool(request.files.getlist('images'))
             data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
             data["user_id"] = user_id
 
-            uploaded_files = request.files.getlist('screenshots') if request.files else []
+            # Handle image uploads
+            uploaded_files = request.files.getlist('images') if has_files else []
             urls = []
             for f in uploaded_files:
                 if f and f.filename and allowed_file(f.filename):
@@ -700,6 +762,7 @@ class TradeLogListResource(Resource):
                     if url:
                         urls.append(url)
 
+            # Process and convert data types
             processed_data = {}
             for key, value in data.items():
                 if key in ['entry_price', 'exit_price']:
@@ -709,11 +772,21 @@ class TradeLogListResource(Resource):
                 else:
                     processed_data[key] = value
 
+            # Validate required fields
+            required_fields = ['symbol', 'entry_price', 'exit_price', 'quantity']
+            for field in required_fields:
+                if not processed_data.get(field):
+                    return {"error": f"Missing required field: {field}"}, 400
+
+            # Load trade log schema
             tl = trade_log_schema.load(processed_data)
             if urls:
-                tl.screenshots = urls
+                tl.images = urls
 
+            # Get trade type
             trade_type = data.get("trade_type", "Long")
+
+            # Create associated trade
             trade = Trade(
                 user_id=user_id,
                 strategy_id=getattr(tl, "strategy_id", None),
@@ -725,7 +798,7 @@ class TradeLogListResource(Resource):
                 strategy_used=getattr(tl, "trading_strategy", None),
                 entry_reason=getattr(tl, "trade_notes", "") or "",
                 exit_reason="",
-                screenshots=urls if urls else None,
+                images=urls if urls else [],
             )
             trade.profit_loss = compute_pnl(trade.entry_price, trade.exit_price, trade.quantity, trade.trade_type)
 
@@ -739,11 +812,12 @@ class TradeLogListResource(Resource):
             db.session.commit()
 
             result = trade_log_schema.dump(tl)
-            screenshots = result.get('screenshots') or []
-            result['screenshot_urls'] = screenshots
+            images = result.get('images') or []
+            result['image_urls'] = images
             return result, 201
         except Exception as e:
             db.session.rollback()
+            print(f"🔴 Error creating trade log: {str(e)}")
             return {"error": f"Failed to create trade log: {str(e)}"}, 400
 
 
@@ -756,8 +830,8 @@ class TradeLogResource(Resource):
             if not tl:
                 return {"error": "Trade log not found"}, 404
             result = trade_log_schema.dump(tl)
-            screenshots = result.get('screenshots') or []
-            result['screenshot_urls'] = screenshots
+            images = result.get('images') or []
+            result['image_urls'] = images
             return result
         except Exception as e:
             return {"error": f"Failed to fetch trade log: {str(e)}"}, 500
@@ -770,11 +844,12 @@ class TradeLogResource(Resource):
             if not tl:
                 return {"error": "Trade log not found"}, 404
 
-            has_files = bool(request.files.getlist('screenshots'))
+            has_files = bool(request.files.getlist('images'))
             data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
 
+            # Handle new image uploads
             if has_files:
-                uploaded_files = request.files.getlist('screenshots')
+                uploaded_files = request.files.getlist('images')
                 urls = []
                 for f in uploaded_files:
                     if f and f.filename and allowed_file(f.filename):
@@ -782,8 +857,8 @@ class TradeLogResource(Resource):
                         if url:
                             urls.append(url)
                 if urls:
-                    existing = tl.screenshots or []
-                    data['screenshots'] = existing + urls
+                    existing = tl.images or []
+                    data['images'] = existing + urls
 
             data.pop('user_id', None)
             data.pop('id', None)
@@ -811,8 +886,8 @@ class TradeLogResource(Resource):
                     t.quantity = tl.quantity
                     if trade_type is not None:
                         t.trade_type = trade_type
-                    if tl.screenshots:
-                        t.screenshots = tl.screenshots
+                    if tl.images:
+                        t.images = tl.images
                     t.profit_loss = compute_pnl(t.entry_price, t.exit_price, t.quantity, t.trade_type)
 
             if trade_type is None and tl.trade_id:
@@ -823,8 +898,8 @@ class TradeLogResource(Resource):
             db.session.commit()
 
             result = trade_log_schema.dump(tl)
-            screenshots = result.get('screenshots') or []
-            result['screenshot_urls'] = screenshots
+            images = result.get('images') or []
+            result['image_urls'] = images
             return result
         except Exception as e:
             db.session.rollback()
@@ -901,7 +976,7 @@ class StrategyWiseTradesResource(Resource):
                 strategy_trades[strategy_name]["total_trades"] += 1
                 strategy_trades[strategy_name]["total_pnl"] += pnl
 
-                screenshots = getattr(trade_log, 'screenshots', []) or []
+                images = getattr(trade_log, 'images', []) or []
                 trade_detail = {
                     "id": trade_log.id,
                     "symbol": trade_log.symbol,
@@ -910,7 +985,7 @@ class StrategyWiseTradesResource(Resource):
                     "quantity": trade_log.quantity,
                     "pnl": pnl,
                     "result": result,
-                    "screenshot_urls": screenshots
+                    "image_urls": images
                 }
                 strategy_trades[strategy_name]["trades"].append(trade_detail)
 
