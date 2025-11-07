@@ -6,6 +6,7 @@ from .extensions import db, bcrypt
 from .models import Strategy, Analysis, Trade, TradeLog, User
 from .schemas import StrategySchema, AnalysisSchema, TradeSchema, TradeLogSchema, UserSchema
 from sqlalchemy import or_, desc, asc
+from datetime import datetime
 import cloudinary.uploader
 
 # Constants
@@ -27,16 +28,22 @@ def is_valid_email(email):
 
 def cloudinary_upload_image(file_storage, user_id, folder="upload"):
     """Upload image to Cloudinary"""
-    folder_path = f"{folder}/user_{user_id}"
-    res = cloudinary.uploader.upload(
-        file_storage,
-        folder=folder_path,
-        overwrite=False,
-        unique_filename=True,
-        use_filename=False,
-        resource_type="image"
-    )
-    return res.get("secure_url")
+    try:
+        folder_path = f"{folder}/user_{user_id}"
+        res = cloudinary.uploader.upload(
+            file_storage,
+            folder=folder_path,
+            overwrite=False,
+            unique_filename=True,
+            use_filename=False,
+            resource_type="image"
+        )
+        url = res.get("secure_url")
+        print(f"✅ Image uploaded: {url}")
+        return url
+    except Exception as e:
+        print(f"❌ Cloudinary upload error: {str(e)}")
+        return None
 
 
 def compute_pnl(entry_price, exit_price, quantity, trade_type):
@@ -86,6 +93,69 @@ def format_pagination_response(pagination, schema, items=None):
     }
 
 
+def extract_request_data():
+    """
+    FIXED: Extract data from either FormData or JSON
+    Handles both multipart/form-data and application/json
+    Safely handles cases where Content-Type is multipart but no files
+    """
+    has_files = bool(request.files.getlist('images'))
+
+    # Check Content-Type header
+    content_type = request.content_type or ''
+
+    if 'multipart/form-data' in content_type:
+        # FormData submission (even without images)
+        data = {k: v for k, v in request.form.items()}
+        print(f"📦 Extracted FormData: {len(data)} fields, Files: {len(request.files)}")
+    elif 'application/json' in content_type:
+        # JSON submission
+        try:
+            data = request.get_json() or {}
+            print(f"📦 Extracted JSON: {len(data)} fields")
+        except Exception as e:
+            print(f"⚠️ JSON parsing failed: {str(e)}")
+            data = {}
+    else:
+        # Fallback: try JSON first, then FormData
+        try:
+            data = request.get_json() or {}
+            print(f"📦 Extracted JSON (fallback): {len(data)} fields")
+        except:
+            data = {k: v for k, v in request.form.items()}
+            print(f"📦 Extracted FormData (fallback): {len(data)} fields")
+
+    return data, has_files
+
+
+def parse_datetime(date_str):
+    """
+    FIXED: Parse ISO date string to Python datetime object
+    Handles ISO format with timezone and milliseconds
+    """
+    if not date_str:
+        return None
+
+    if isinstance(date_str, datetime):
+        return date_str
+
+    if isinstance(date_str, str):
+        try:
+            # Handle ISO format with timezone
+            if 'T' in date_str:
+                # Remove 'Z' and milliseconds if present
+                date_str = date_str.replace('Z', '').split('.')[0]
+                return datetime.fromisoformat(date_str)
+            else:
+                # Simple date format YYYY-MM-DD
+                return datetime.strptime(date_str, '%Y-%m-%d').date()
+        except Exception as e:
+            print(f"⚠️ Date parsing failed for '{date_str}': {str(e)}")
+            return None
+
+    return date_str
+
+
 # Initialize schemas
 user_schema = UserSchema()
 strategy_schema = StrategySchema()
@@ -108,7 +178,6 @@ class UserRegisterResource(Resource):
     def post(self):
         try:
             data = request.get_json() or {}
-
             email = data.get("email", "").strip().lower()
             password = data.get("password", "")
             first_name = data.get("first_name", "").strip()
@@ -127,17 +196,11 @@ class UserRegisterResource(Resource):
                 return {"error": "Email already registered"}, 409
 
             pw_hash = bcrypt.generate_password_hash(password).decode("utf-8")
-            user = User(
-                email=email,
-                password_hash=pw_hash,
-                first_name=first_name,
-                last_name=last_name
-            )
+            user = User(email=email, password_hash=pw_hash, first_name=first_name, last_name=last_name)
             db.session.add(user)
             db.session.commit()
 
             token = create_access_token(identity=str(user.id))
-
             return {
                 "message": "User registered successfully",
                 "access_token": token,
@@ -159,7 +222,6 @@ class UserLoginResource(Resource):
     def post(self):
         try:
             data = request.get_json() or {}
-
             email = data.get("email", "").strip().lower()
             password = data.get("password", "")
 
@@ -171,7 +233,6 @@ class UserLoginResource(Resource):
                 return {"error": "Invalid email or password"}, 401
 
             token = create_access_token(identity=str(user.id))
-
             return {
                 "message": "Login successful",
                 "access_token": token,
@@ -195,14 +256,9 @@ class UserProfileResource(Resource):
         try:
             user_id = int(get_jwt_identity())
             user = User.query.get(user_id)
-
             if not user:
                 return {"error": "User not found"}, 404
-
-            return {
-                "message": "Profile fetched successfully",
-                "user": user_schema.dump(user)
-            }, 200
+            return {"message": "Profile fetched successfully", "user": user_schema.dump(user)}, 200
         except Exception as e:
             return {"error": f"Failed to fetch profile: {str(e)}"}, 500
 
@@ -211,24 +267,18 @@ class UserProfileResource(Resource):
         try:
             user_id = int(get_jwt_identity())
             user = User.query.get(user_id)
-
             if not user:
                 return {"error": "User not found"}, 404
 
             data = request.get_json() or {}
-
             if "first_name" in data and data["first_name"]:
                 user.first_name = data["first_name"].strip()
-
             if "last_name" in data and data["last_name"]:
                 user.last_name = data["last_name"].strip()
-
             if "bio" in data:
                 user.bio = data["bio"].strip() if data["bio"] else None
-
             if "location" in data:
                 user.location = data["location"].strip() if data["location"] else None
-
             if "email" in data and data["email"].strip().lower() != user.email:
                 new_email = data["email"].strip().lower()
                 if not is_valid_email(new_email):
@@ -238,11 +288,7 @@ class UserProfileResource(Resource):
                 user.email = new_email
 
             db.session.commit()
-
-            return {
-                "message": "Profile updated successfully",
-                "user": user_schema.dump(user)
-            }, 200
+            return {"message": "Profile updated successfully", "user": user_schema.dump(user)}, 200
         except Exception as e:
             db.session.rollback()
             return {"error": f"Failed to update profile: {str(e)}"}, 400
@@ -252,57 +298,18 @@ class UserProfileResource(Resource):
         try:
             user_id = int(get_jwt_identity())
             user = User.query.get(user_id)
-
             if not user:
                 return {"error": "User not found"}, 404
-
             db.session.delete(user)
             db.session.commit()
-
             return {"message": "Account deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
             return {"error": f"Failed to delete account: {str(e)}"}, 500
 
 
-class UserProfileAvatarResource(Resource):
-    """Upload user avatar to Cloudinary"""
-
-    @jwt_required()
-    def post(self):
-        try:
-            user_id = int(get_jwt_identity())
-            user = User.query.get(user_id)
-
-            if not user:
-                return {"error": "User not found"}, 404
-
-            if 'avatar' not in request.files:
-                return {"error": "No file provided"}, 400
-
-            file = request.files['avatar']
-            if not file or not file.filename:
-                return {"error": "No file selected"}, 400
-
-            if not allowed_file(file.filename):
-                return {"error": "Invalid file type. Allowed: png, jpg, jpeg, gif, webp"}, 400
-
-            avatar_url = cloudinary_upload_image(file, user_id, folder="profile")
-
-            user.avatar_url = avatar_url
-            db.session.commit()
-
-            return {
-                "message": "Avatar uploaded successfully",
-                "avatar_url": avatar_url
-            }, 200
-        except Exception as e:
-            db.session.rollback()
-            return {"error": f"Failed to upload avatar: {str(e)}"}, 500
-
-
 # ========================
-# STRATEGY RESOURCES - WITH IMAGE UPLOAD
+# STRATEGY RESOURCES
 # ========================
 
 class StrategyListResource(Resource):
@@ -337,11 +344,9 @@ class StrategyListResource(Resource):
     def post(self):
         user_id = int(get_jwt_identity())
         try:
-            has_files = bool(request.files.getlist('images'))
-            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+            data, has_files = extract_request_data()
             data["user_id"] = user_id
 
-            # Handle image uploads
             uploaded_files = request.files.getlist('images') if has_files else []
             urls = []
             for f in uploaded_files:
@@ -353,12 +358,15 @@ class StrategyListResource(Resource):
             if urls:
                 data['images'] = urls
 
+            print(f"📝 Creating Strategy: {data.get('name')}, Files: {len(urls)}")
+
             s = strategy_schema.load(data)
             db.session.add(s)
             db.session.commit()
             return strategy_schema.dump(s), 201
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error creating strategy: {str(e)}")
             return {"error": f"Failed to create strategy: {str(e)}"}, 400
 
 
@@ -382,10 +390,8 @@ class StrategyResource(Resource):
             if not s:
                 return {"error": "Strategy not found"}, 404
 
-            has_files = bool(request.files.getlist('images'))
-            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+            data, has_files = extract_request_data()
 
-            # Handle new image uploads
             if has_files:
                 uploaded_files = request.files.getlist('images')
                 urls = []
@@ -400,13 +406,17 @@ class StrategyResource(Resource):
 
             data.pop('user_id', None)
             data.pop('id', None)
+            data.pop('created_at', None)
+
             for k, v in data.items():
                 if hasattr(s, k) and k not in ['id', 'user_id', 'created_at']:
                     setattr(s, k, v)
             db.session.commit()
+            print(f"✅ Strategy updated: ID={strategy_id}")
             return strategy_schema.dump(s)
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error updating strategy: {str(e)}")
             return {"error": f"Failed to update strategy: {str(e)}"}, 400
 
     @jwt_required()
@@ -421,11 +431,12 @@ class StrategyResource(Resource):
             return {"message": "Strategy deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error deleting strategy: {str(e)}")
             return {"error": f"Failed to delete strategy: {str(e)}"}, 400
 
 
 # ========================
-# ANALYSIS RESOURCES - WITH IMAGE UPLOAD
+# ANALYSIS RESOURCES
 # ========================
 
 class AnalysisListResource(Resource):
@@ -459,11 +470,9 @@ class AnalysisListResource(Resource):
     def post(self):
         user_id = int(get_jwt_identity())
         try:
-            has_files = bool(request.files.getlist('images'))
-            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+            data, has_files = extract_request_data()
             data["user_id"] = user_id
 
-            # Handle image uploads
             uploaded_files = request.files.getlist('images') if has_files else []
             urls = []
             for f in uploaded_files:
@@ -475,12 +484,15 @@ class AnalysisListResource(Resource):
             if urls:
                 data['images'] = urls
 
+            print(f"📝 Creating Analysis: {data.get('symbol')}, Files: {len(urls)}")
+
             a = analysis_schema.load(data)
             db.session.add(a)
             db.session.commit()
             return analysis_schema.dump(a), 201
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error creating analysis: {str(e)}")
             return {"error": f"Failed to create analysis: {str(e)}"}, 400
 
 
@@ -504,10 +516,8 @@ class AnalysisResource(Resource):
             if not a:
                 return {"error": "Analysis not found"}, 404
 
-            has_files = bool(request.files.getlist('images'))
-            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+            data, has_files = extract_request_data()
 
-            # Handle new image uploads
             if has_files:
                 uploaded_files = request.files.getlist('images')
                 urls = []
@@ -522,13 +532,17 @@ class AnalysisResource(Resource):
 
             data.pop('user_id', None)
             data.pop('id', None)
+            data.pop('created_at', None)
+
             for k, v in data.items():
                 if hasattr(a, k) and k not in ['id', 'user_id', 'created_at']:
                     setattr(a, k, v)
             db.session.commit()
+            print(f"✅ Analysis updated: ID={analysis_id}")
             return analysis_schema.dump(a)
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error updating analysis: {str(e)}")
             return {"error": f"Failed to update analysis: {str(e)}"}, 400
 
     @jwt_required()
@@ -543,11 +557,12 @@ class AnalysisResource(Resource):
             return {"message": "Analysis deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error deleting analysis: {str(e)}")
             return {"error": f"Failed to delete analysis: {str(e)}"}, 400
 
 
 # ========================
-# TRADE RESOURCES - WITH IMAGE UPLOAD
+# TRADE RESOURCES
 # ========================
 
 class TradeListResource(Resource):
@@ -587,10 +602,8 @@ class TradeListResource(Resource):
     def post(self):
         user_id = int(get_jwt_identity())
         try:
-            has_files = bool(request.files.getlist('images'))
-            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+            data, has_files = extract_request_data()
 
-            # Handle image uploads
             uploaded_files = request.files.getlist('images') if has_files else []
             urls = []
             for f in uploaded_files:
@@ -607,6 +620,8 @@ class TradeListResource(Resource):
                     processed_data[key] = float(value) if value else None
                 elif key in ['quantity', 'strategy_id']:
                     processed_data[key] = int(value) if value else None
+                elif key in ['entry_date', 'exit_date']:
+                    processed_data[key] = parse_datetime(value)
                 else:
                     processed_data[key] = value
 
@@ -616,6 +631,8 @@ class TradeListResource(Resource):
             for field in required_fields:
                 if not processed_data.get(field):
                     return {"error": f"Missing required field: {field}"}, 400
+
+            print(f"📝 Creating Trade: {processed_data.get('symbol')}, Files: {len(urls)}")
 
             t = trade_schema.load(processed_data)
             t.profit_loss = compute_pnl(t.entry_price, t.exit_price, t.quantity, t.trade_type)
@@ -629,6 +646,7 @@ class TradeListResource(Resource):
             return result, 201
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error creating trade: {str(e)}")
             return {"error": f"Failed to create trade: {str(e)}"}, 400
 
 
@@ -655,10 +673,8 @@ class TradeResource(Resource):
             if not t:
                 return {"error": "Trade not found"}, 404
 
-            has_files = bool(request.files.getlist('images'))
-            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+            data, has_files = extract_request_data()
 
-            # Handle new image uploads
             if has_files:
                 uploaded_files = request.files.getlist('images')
                 urls = []
@@ -673,17 +689,22 @@ class TradeResource(Resource):
 
             data.pop('user_id', None)
             data.pop('id', None)
+            data.pop('created_at', None)
 
             for key, value in data.items():
                 if key in ['entry_price', 'exit_price']:
                     value = float(value) if value else None
                 elif key in ['quantity', 'strategy_id']:
                     value = int(value) if value else None
+                elif key in ['entry_date', 'exit_date']:
+                    value = parse_datetime(value)
+
                 if hasattr(t, key) and key not in ['id', 'user_id', 'created_at']:
                     setattr(t, key, value)
 
             t.profit_loss = compute_pnl(t.entry_price, t.exit_price, t.quantity, t.trade_type)
             db.session.commit()
+            print(f"✅ Trade updated: ID={trade_id}")
 
             result = trade_schema.dump(t)
             images = result.get('images') or []
@@ -691,6 +712,7 @@ class TradeResource(Resource):
             return result
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error updating trade: {str(e)}")
             return {"error": f"Failed to update trade: {str(e)}"}, 400
 
     @jwt_required()
@@ -705,11 +727,12 @@ class TradeResource(Resource):
             return {"message": "Trade deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error deleting trade: {str(e)}")
             return {"error": f"Failed to delete trade: {str(e)}"}, 400
 
 
 # ========================
-# TRADE LOG RESOURCES - WITH IMAGE UPLOAD
+# TRADE LOG RESOURCES
 # ========================
 
 class TradeLogListResource(Resource):
@@ -749,11 +772,9 @@ class TradeLogListResource(Resource):
     def post(self):
         user_id = int(get_jwt_identity())
         try:
-            has_files = bool(request.files.getlist('images'))
-            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+            data, has_files = extract_request_data()
             data["user_id"] = user_id
 
-            # Handle image uploads
             uploaded_files = request.files.getlist('images') if has_files else []
             urls = []
             for f in uploaded_files:
@@ -762,31 +783,30 @@ class TradeLogListResource(Resource):
                     if url:
                         urls.append(url)
 
-            # Process and convert data types
             processed_data = {}
             for key, value in data.items():
                 if key in ['entry_price', 'exit_price']:
                     processed_data[key] = float(value) if value else None
                 elif key == 'quantity':
                     processed_data[key] = int(value) if value else None
+                elif key in ['entry_date', 'exit_date']:
+                    processed_data[key] = parse_datetime(value)
                 else:
                     processed_data[key] = value
 
-            # Validate required fields
             required_fields = ['symbol', 'entry_price', 'exit_price', 'quantity']
             for field in required_fields:
                 if not processed_data.get(field):
                     return {"error": f"Missing required field: {field}"}, 400
 
-            # Load trade log schema
+            print(f"📝 Creating Trade Log: {processed_data.get('symbol')}, Files: {len(urls)}")
+
             tl = trade_log_schema.load(processed_data)
             if urls:
                 tl.images = urls
 
-            # Get trade type
             trade_type = data.get("trade_type", "Long")
 
-            # Create associated trade
             trade = Trade(
                 user_id=user_id,
                 strategy_id=getattr(tl, "strategy_id", None),
@@ -799,6 +819,8 @@ class TradeLogListResource(Resource):
                 entry_reason=getattr(tl, "trade_notes", "") or "",
                 exit_reason="",
                 images=urls if urls else [],
+                entry_date=getattr(tl, "entry_date", None),
+                exit_date=getattr(tl, "exit_date", None),
             )
             trade.profit_loss = compute_pnl(trade.entry_price, trade.exit_price, trade.quantity, trade.trade_type)
 
@@ -817,7 +839,7 @@ class TradeLogListResource(Resource):
             return result, 201
         except Exception as e:
             db.session.rollback()
-            print(f"🔴 Error creating trade log: {str(e)}")
+            print(f"❌ Error creating trade log: {str(e)}")
             return {"error": f"Failed to create trade log: {str(e)}"}, 400
 
 
@@ -844,10 +866,13 @@ class TradeLogResource(Resource):
             if not tl:
                 return {"error": "Trade log not found"}, 404
 
-            has_files = bool(request.files.getlist('images'))
-            data = {k: v for k, v in request.form.items()} if has_files else (request.get_json() or {})
+            # FIXED: Use helper function to extract data from FormData or JSON
+            data, has_files = extract_request_data()
 
-            # Handle new image uploads
+            print(f"📝 Updating Trade Log: ID={log_id}, Has Files: {has_files}")
+            print(f"📋 Content-Type: {request.content_type}")
+
+            # Handle new image uploads if files present
             if has_files:
                 uploaded_files = request.files.getlist('images')
                 urls = []
@@ -859,27 +884,51 @@ class TradeLogResource(Resource):
                 if urls:
                     existing = tl.images or []
                     data['images'] = existing + urls
+                    print(f"✅ Images uploaded: {len(urls)}, Total: {len(data['images'])}")
 
+            # Remove protected fields
             data.pop('user_id', None)
             data.pop('id', None)
+            data.pop('created_at', None)
 
+            # Convert data types and parse dates
             trade_type = data.get("trade_type", None)
             processed_data = {}
+
             for key, value in data.items():
                 if key in ['entry_price', 'exit_price']:
                     processed_data[key] = float(value) if value else None
                 elif key == 'quantity':
                     processed_data[key] = int(value) if value else None
+                elif key in ['entry_date', 'exit_date']:
+                    # FIXED: Parse ISO datetime strings to Python datetime objects
+                    processed_data[key] = parse_datetime(value)
+                    print(f"   ✓ Parsed {key}: {value} -> {processed_data[key]}")
                 else:
                     processed_data[key] = value
 
+            # Update trade log fields
             for k, v in processed_data.items():
                 if hasattr(tl, k) and k not in ['id', 'user_id', 'created_at']:
                     setattr(tl, k, v)
+                    print(f"   ✓ Set {k}: {v}")
 
+            # Calculate P&L for trade log
+            if trade_type is None and tl.trade_id:
+                linked_trade = Trade.query.get(tl.trade_id)
+                trade_type = linked_trade.trade_type if linked_trade else "Long"
+
+            tl.profit_loss = compute_pnl(tl.entry_price, tl.exit_price, tl.quantity, trade_type or "Long")
+            print(f"💰 Trade Log P&L calculated: {tl.profit_loss}")
+
+            db.session.commit()
+            print(f"✅ Trade Log updated successfully: ID={log_id}")
+
+            # Update linked trade if it exists
             if tl.trade_id:
                 t = Trade.query.filter_by(id=tl.trade_id, user_id=user_id).first()
                 if t:
+                    print(f"📌 Updating linked Trade: ID={tl.trade_id}")
                     t.symbol = tl.symbol
                     t.entry_price = tl.entry_price
                     t.exit_price = tl.exit_price
@@ -888,14 +937,13 @@ class TradeLogResource(Resource):
                         t.trade_type = trade_type
                     if tl.images:
                         t.images = tl.images
+                    if hasattr(tl, 'entry_date') and tl.entry_date:
+                        t.entry_date = tl.entry_date
+                    if hasattr(tl, 'exit_date') and tl.exit_date:
+                        t.exit_date = tl.exit_date
                     t.profit_loss = compute_pnl(t.entry_price, t.exit_price, t.quantity, t.trade_type)
-
-            if trade_type is None and tl.trade_id:
-                linked_trade = Trade.query.get(tl.trade_id)
-                trade_type = linked_trade.trade_type if linked_trade else "Long"
-            tl.profit_loss = compute_pnl(tl.entry_price, tl.exit_price, tl.quantity, trade_type or "Long")
-
-            db.session.commit()
+                    db.session.commit()
+                    print(f"   ✓ Trade updated with P&L: {t.profit_loss}")
 
             result = trade_log_schema.dump(tl)
             images = result.get('images') or []
@@ -903,6 +951,9 @@ class TradeLogResource(Resource):
             return result
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error updating trade log: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {"error": f"Failed to update trade log: {str(e)}"}, 400
 
     @jwt_required()
@@ -923,6 +974,7 @@ class TradeLogResource(Resource):
             return {"message": "Trade log deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Error deleting trade log: {str(e)}")
             return {"error": f"Failed to delete trade log: {str(e)}"}, 400
 
 
@@ -1020,6 +1072,7 @@ class StrategyWiseTradesResource(Resource):
                 }
             }, 200
         except Exception as e:
+            print(f"❌ Error fetching strategy-wise trades: {str(e)}")
             return {"error": f"Failed to fetch strategy-wise trades: {str(e)}"}, 500
 
 
@@ -1059,6 +1112,7 @@ class TradeLogStatsResource(Resource):
                 }
             }, 200
         except Exception as e:
+            print(f"❌ Error fetching stats: {str(e)}")
             return {"error": f"Failed to fetch trade log stats: {str(e)}"}, 500
 
 
@@ -1074,7 +1128,6 @@ def register_resources(api):
     api.add_resource(UserRegisterResource, "/api/auth/register")
     api.add_resource(UserLoginResource, "/api/auth/login")
     api.add_resource(UserProfileResource, "/api/auth/profile")
-    api.add_resource(UserProfileAvatarResource, "/api/auth/profile/avatar")
 
     # Strategies
     api.add_resource(StrategyListResource, '/api/strategies')
