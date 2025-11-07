@@ -30,13 +30,16 @@ STEP 2: Setup BACKEND
 
 - Add the .env content
 
-2.5 Setup Database - Run this command 
+2.5 Setup Database
 
-- python -c "from app import create_app; app = create_app(); app.app_context().push(); from app.extensions import db; db.create_all(); print('✅ SQLite Database initialized!')"
+-  Create Instance Folder
+  
+-  flask create-db
 
 2.6 Run Backend Server
 
 - python run.py
+
 
 
 
