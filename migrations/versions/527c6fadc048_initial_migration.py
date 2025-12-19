@@ -1,8 +1,8 @@
-"""Create schema with email auth
+"""Initial migration
 
-Revision ID: c041fa699ce2
+Revision ID: 527c6fadc048
 Revises: 
-Create Date: 2025-11-06 17:10:09.847951
+Create Date: 2025-12-19 18:08:12.467515
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import sqlite
 
 # revision identifiers, used by Alembic.
-revision = 'c041fa699ce2'
+revision = '527c6fadc048'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -44,6 +44,7 @@ def upgrade():
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('trading_rules', sa.Text(), nullable=True),
     sa.Column('additional_notes', sa.Text(), nullable=True),
+    sa.Column('images', sqlite.JSON(), server_default='[]', nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
@@ -66,6 +67,7 @@ def upgrade():
     sa.Column('technical_analysis', sa.Text(), nullable=False),
     sa.Column('fundamental_analysis', sa.Text(), nullable=True),
     sa.Column('additional_notes', sa.Text(), nullable=True),
+    sa.Column('images', sqlite.JSON(), server_default='[]', nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['strategy_id'], ['strategies.id'], ),
@@ -89,7 +91,7 @@ def upgrade():
     sa.Column('tags', sa.Text(), nullable=True),
     sa.Column('profit_loss', sa.Float(), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
-    sa.Column('screenshots', sqlite.JSON(), nullable=True),
+    sa.Column('images', sqlite.JSON(), server_default='[]', nullable=False),
     sa.Column('entry_time', sa.DateTime(), nullable=True),
     sa.Column('exit_time', sa.DateTime(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
@@ -111,7 +113,7 @@ def upgrade():
     sa.Column('trading_strategy', sa.String(length=128), nullable=True),
     sa.Column('trade_notes', sa.Text(), nullable=True),
     sa.Column('profit_loss', sa.Float(), nullable=True),
-    sa.Column('screenshots', sqlite.JSON(), server_default='[]', nullable=False),
+    sa.Column('images', sqlite.JSON(), server_default='[]', nullable=False),
     sa.Column('strategy_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
