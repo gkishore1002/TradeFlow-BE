@@ -1,11 +1,17 @@
 # Virtual Environment
 venv/
 env/
+ENV/
+.venv
+virtualenv/
 
 # Environment Variables
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
+.env.test
 
 # Python Cache
 __pycache__/
@@ -25,9 +31,13 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
 
 # IDE
 .vscode/
@@ -35,16 +45,135 @@ wheels/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+Desktop.ini
 
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
 
 # Database
 *.db
 *.sqlite
+*.sqlite3
+instance/
+*.db-journal
+
+# Flask Instance Folder
+instance/
+.webassets-cache
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# pyenv
+.python-version
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Uploaded files (if storing locally)
+uploads/
+static/uploads/
+media/
+
+# Backup files
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+
+# Migrations (OPTIONAL - uncomment if you don't want to share migrations)
+# migrations/versions/*.py
+# !migrations/versions/__init__.py
+
+# Cloudinary credentials
+cloudinary_config.txt
+
+# SQLite WAL files
+*.db-shm
+*.db-wal
+
+# Flask session files
+flask_session/
+
+# Security
+*.pem
+*.key
+*.crt
+*.p12
+secrets.json
+credentials.json
+service-account.json
+
+# Package manager files
+Pipfile.lock
+poetry.lock
+
+# Documentation builds
+docs/_build/

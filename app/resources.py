@@ -1,4 +1,4 @@
-# resources/resources.py
+# app/resources.py
 import re
 from flask import request
 from flask_restful import Resource
@@ -6,6 +6,7 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identi
 from .extensions import db, bcrypt
 from .models import Strategy, Analysis, Trade, TradeLog, User
 from .schemas import StrategySchema, AnalysisSchema, TradeSchema, TradeLogSchema, UserSchema
+from .notification_service import NotificationService
 from sqlalchemy import or_, desc, asc
 from datetime import datetime
 import cloudinary.uploader
@@ -15,14 +16,16 @@ ALLOWED_EXT = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 
 # ========================
-# HELPERS
+# HELPER FUNCTIONS
 # ========================
 
 def allowed_file(filename):
+    """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXT
 
 
 def is_valid_email(email):
+    """Validate email format"""
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
@@ -95,45 +98,32 @@ def format_pagination_response(pagination, schema, items=None):
 
 
 def extract_request_data():
-    """
-    FIXED: Extract data from either FormData or JSON
-    Handles both multipart/form-data and application/json
-    """
+    """Extract data from either FormData or JSON"""
     has_files = bool(request.files.getlist('images'))
     content_type = request.content_type or ''
 
     if 'multipart/form-data' in content_type:
         data = {k: v for k, v in request.form.items()}
-        print(f"📦 Extracted FormData: {len(data)} fields, Files: {len(request.files)}")
     elif 'application/json' in content_type:
         try:
             data = request.get_json() or {}
-            print(f"📦 Extracted JSON: {len(data)} fields")
-        except Exception as e:
-            print(f"⚠️ JSON parsing failed: {str(e)}")
+        except Exception:
             data = {}
     else:
         try:
             data = request.get_json() or {}
-            print(f"📦 Extracted JSON (fallback): {len(data)} fields")
         except:
             data = {k: v for k, v in request.form.items()}
-            print(f"📦 Extracted FormData (fallback): {len(data)} fields")
 
     return data, has_files
 
 
 def parse_datetime(date_str):
-    """
-    FIXED: Parse ISO date string to Python datetime object
-    Handles ISO format with timezone and milliseconds
-    """
+    """Parse ISO date string to Python datetime object"""
     if not date_str:
         return None
-
     if isinstance(date_str, datetime):
         return date_str
-
     if isinstance(date_str, str):
         try:
             if 'T' in date_str:
@@ -144,7 +134,6 @@ def parse_datetime(date_str):
         except Exception as e:
             print(f"⚠️ Date parsing failed for '{date_str}': {str(e)}")
             return None
-
     return date_str
 
 
@@ -192,6 +181,14 @@ class UserRegisterResource(Resource):
             db.session.add(user)
             db.session.commit()
 
+            NotificationService.create_notification(
+                user_id=user.id,
+                title="Welcome to Trading App! 🎉",
+                message=f"Welcome {first_name}! Your account has been created successfully.",
+                notification_type="system",
+                link="/dashboard"
+            )
+
             token = create_access_token(identity=str(user.id))
             return {
                 "message": "User registered successfully",
@@ -205,6 +202,7 @@ class UserRegisterResource(Resource):
             }, 201
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Registration error: {str(e)}")
             return {"error": f"Registration failed: {str(e)}"}, 500
 
 
@@ -237,6 +235,7 @@ class UserLoginResource(Resource):
                 }
             }, 200
         except Exception as e:
+            print(f"❌ Login error: {str(e)}")
             return {"error": f"Login failed: {str(e)}"}, 500
 
 
@@ -252,6 +251,7 @@ class UserProfileResource(Resource):
                 return {"error": "User not found"}, 404
             return {"message": "Profile fetched successfully", "user": user_schema.dump(user)}, 200
         except Exception as e:
+            print(f"❌ Profile fetch error: {str(e)}")
             return {"error": f"Failed to fetch profile: {str(e)}"}, 500
 
     @jwt_required()
@@ -280,9 +280,19 @@ class UserProfileResource(Resource):
                 user.email = new_email
 
             db.session.commit()
+
+            NotificationService.create_notification(
+                user_id=user_id,
+                title="Profile Updated ✅",
+                message="Your profile has been updated successfully.",
+                notification_type="system",
+                link="/profile"
+            )
+
             return {"message": "Profile updated successfully", "user": user_schema.dump(user)}, 200
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Profile update error: {str(e)}")
             return {"error": f"Failed to update profile: {str(e)}"}, 400
 
     @jwt_required()
@@ -297,6 +307,7 @@ class UserProfileResource(Resource):
             return {"message": "Account deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
+            print(f"❌ Account deletion error: {str(e)}")
             return {"error": f"Failed to delete account: {str(e)}"}, 500
 
 
@@ -330,6 +341,7 @@ class StrategyListResource(Resource):
             pagination = query.paginate(page=page, per_page=per_page, error_out=False)
             return format_pagination_response(pagination, strategies_schema)
         except Exception as e:
+            print(f"❌ Strategy list error: {str(e)}")
             return {"error": f"Failed to fetch strategies: {str(e)}"}, 500
 
     @jwt_required()
@@ -350,11 +362,12 @@ class StrategyListResource(Resource):
             if urls:
                 data['images'] = urls
 
-            print(f"📝 Creating Strategy: {data.get('name')}, Files: {len(urls)}")
-
             s = strategy_schema.load(data)
             db.session.add(s)
             db.session.commit()
+
+            NotificationService.notify_new_strategy(user_id, s)
+
             return strategy_schema.dump(s), 201
         except Exception as e:
             db.session.rollback()
@@ -372,6 +385,7 @@ class StrategyResource(Resource):
                 return {"error": "Strategy not found"}, 404
             return strategy_schema.dump(s)
         except Exception as e:
+            print(f"❌ Strategy fetch error: {str(e)}")
             return {"error": f"Failed to fetch strategy: {str(e)}"}, 500
 
     @jwt_required()
@@ -404,7 +418,16 @@ class StrategyResource(Resource):
                 if hasattr(s, k) and k not in ['id', 'user_id', 'created_at']:
                     setattr(s, k, v)
             db.session.commit()
-            print(f"✅ Strategy updated: ID={strategy_id}")
+
+            NotificationService.create_notification(
+                user_id=user_id,
+                title="Strategy Updated 📝",
+                message=f"Strategy '{s.name}' has been updated successfully.",
+                notification_type="strategy",
+                link=f"/strategies/{s.id}",
+                data={"strategy_id": s.id}
+            )
+
             return strategy_schema.dump(s)
         except Exception as e:
             db.session.rollback()
@@ -418,8 +441,19 @@ class StrategyResource(Resource):
             s = Strategy.query.filter_by(id=strategy_id, user_id=user_id).first()
             if not s:
                 return {"error": "Strategy not found"}, 404
+
+            strategy_name = s.name
             db.session.delete(s)
             db.session.commit()
+
+            NotificationService.create_notification(
+                user_id=user_id,
+                title="Strategy Deleted 🗑️",
+                message=f"Strategy '{strategy_name}' has been deleted.",
+                notification_type="strategy",
+                link="/strategies"
+            )
+
             return {"message": "Strategy deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
@@ -456,6 +490,7 @@ class AnalysisListResource(Resource):
             pagination = query.paginate(page=page, per_page=per_page, error_out=False)
             return format_pagination_response(pagination, analyses_schema)
         except Exception as e:
+            print(f"❌ Analysis list error: {str(e)}")
             return {"error": f"Failed to fetch analyses: {str(e)}"}, 500
 
     @jwt_required()
@@ -476,11 +511,12 @@ class AnalysisListResource(Resource):
             if urls:
                 data['images'] = urls
 
-            print(f"📝 Creating Analysis: {data.get('symbol')}, Files: {len(urls)}")
-
             a = analysis_schema.load(data)
             db.session.add(a)
             db.session.commit()
+
+            NotificationService.notify_new_analysis(user_id, a)
+
             return analysis_schema.dump(a), 201
         except Exception as e:
             db.session.rollback()
@@ -498,6 +534,7 @@ class AnalysisResource(Resource):
                 return {"error": "Analysis not found"}, 404
             return analysis_schema.dump(a)
         except Exception as e:
+            print(f"❌ Analysis fetch error: {str(e)}")
             return {"error": f"Failed to fetch analysis: {str(e)}"}, 500
 
     @jwt_required()
@@ -530,7 +567,16 @@ class AnalysisResource(Resource):
                 if hasattr(a, k) and k not in ['id', 'user_id', 'created_at']:
                     setattr(a, k, v)
             db.session.commit()
-            print(f"✅ Analysis updated: ID={analysis_id}")
+
+            NotificationService.create_notification(
+                user_id=user_id,
+                title="Analysis Updated 📊",
+                message=f"Analysis for {a.symbol} has been updated.",
+                notification_type="analysis",
+                link=f"/analysis/{a.id}",
+                data={"analysis_id": a.id, "symbol": a.symbol}
+            )
+
             return analysis_schema.dump(a)
         except Exception as e:
             db.session.rollback()
@@ -544,8 +590,19 @@ class AnalysisResource(Resource):
             a = Analysis.query.filter_by(id=analysis_id, user_id=user_id).first()
             if not a:
                 return {"error": "Analysis not found"}, 404
+
+            symbol = a.symbol
             db.session.delete(a)
             db.session.commit()
+
+            NotificationService.create_notification(
+                user_id=user_id,
+                title="Analysis Deleted 🗑️",
+                message=f"Analysis for {symbol} has been deleted.",
+                notification_type="analysis",
+                link="/analysis"
+            )
+
             return {"message": "Analysis deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
@@ -588,6 +645,7 @@ class TradeListResource(Resource):
 
             return result
         except Exception as e:
+            print(f"❌ Trade list error: {str(e)}")
             return {"error": f"Failed to fetch trades: {str(e)}"}, 500
 
     @jwt_required()
@@ -624,13 +682,13 @@ class TradeListResource(Resource):
                 if not processed_data.get(field):
                     return {"error": f"Missing required field: {field}"}, 400
 
-            print(f"📝 Creating Trade: {processed_data.get('symbol')}, Files: {len(urls)}")
-
             t = trade_schema.load(processed_data)
             t.profit_loss = compute_pnl(t.entry_price, t.exit_price, t.quantity, t.trade_type)
 
             db.session.add(t)
             db.session.commit()
+
+            NotificationService.notify_new_trade(user_id, t)
 
             result = trade_schema.dump(t)
             images = result.get('images') or []
@@ -655,6 +713,7 @@ class TradeResource(Resource):
             result['image_urls'] = images
             return result
         except Exception as e:
+            print(f"❌ Trade fetch error: {str(e)}")
             return {"error": f"Failed to fetch trade: {str(e)}"}, 500
 
     @jwt_required()
@@ -696,7 +755,15 @@ class TradeResource(Resource):
 
             t.profit_loss = compute_pnl(t.entry_price, t.exit_price, t.quantity, t.trade_type)
             db.session.commit()
-            print(f"✅ Trade updated: ID={trade_id}")
+
+            NotificationService.create_notification(
+                user_id=user_id,
+                title="Trade Updated 📝",
+                message=f"Trade for {t.symbol} has been updated.",
+                notification_type="trade",
+                link=f"/trades/{t.id}",
+                data={"trade_id": t.id, "symbol": t.symbol}
+            )
 
             result = trade_schema.dump(t)
             images = result.get('images') or []
@@ -714,8 +781,19 @@ class TradeResource(Resource):
             t = Trade.query.filter_by(id=trade_id, user_id=user_id).first()
             if not t:
                 return {"error": "Trade not found"}, 404
+
+            symbol = t.symbol
             db.session.delete(t)
             db.session.commit()
+
+            NotificationService.create_notification(
+                user_id=user_id,
+                title="Trade Deleted 🗑️",
+                message=f"Trade for {symbol} has been deleted.",
+                notification_type="trade",
+                link="/trades"
+            )
+
             return {"message": "Trade deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
@@ -724,7 +802,7 @@ class TradeResource(Resource):
 
 
 # ========================
-# TRADE LOG RESOURCES (FIXED)
+# TRADE LOG RESOURCES
 # ========================
 
 class TradeLogListResource(Resource):
@@ -758,19 +836,15 @@ class TradeLogListResource(Resource):
 
             return result
         except Exception as e:
+            print(f"❌ Trade log list error: {str(e)}")
             return {"error": f"Failed to fetch trade logs: {str(e)}"}, 500
 
     @jwt_required()
     def post(self):
-        """
-        FIXED: Create TradeLog using only TradeLog model
-        NOT creating Trade object automatically
-        """
         user_id = int(get_jwt_identity())
         try:
             data, has_files = extract_request_data()
 
-            # Upload images
             uploaded_files = request.files.getlist('images') if has_files else []
             urls = []
             for f in uploaded_files:
@@ -779,7 +853,6 @@ class TradeLogListResource(Resource):
                     if url:
                         urls.append(url)
 
-            # Process data types
             processed_data = {}
             for key, value in data.items():
                 if key in ['entry_price', 'exit_price']:
@@ -793,26 +866,21 @@ class TradeLogListResource(Resource):
 
             processed_data["user_id"] = user_id
 
-            # Validation
-            required_fields = ['symbol', 'entry_price', 'exit_price', 'quantity', 'entry_date', 'exit_date']
+            required_fields = ['symbol', 'entry_price', 'exit_price', 'quantity', 'entry_date']
             for field in required_fields:
                 if not processed_data.get(field):
                     return {"error": f"Missing required field: {field}"}, 400
 
-            print(f"📝 Creating Trade Log: {processed_data.get('symbol')}, Files: {len(urls)}")
-
-            # FIXED: Create ONLY TradeLog, not Trade
             tl = trade_log_schema.load(processed_data)
             if urls:
                 tl.images = urls
 
-            # Calculate P&L
             tl.profit_loss = compute_pnl(tl.entry_price, tl.exit_price, tl.quantity, "Long")
 
             db.session.add(tl)
             db.session.commit()
 
-            print(f"✅ Trade Log Created: ID {tl.id}")
+            NotificationService.notify_new_trade_log(user_id, tl)
 
             result = trade_log_schema.dump(tl)
             images = result.get('images') or []
@@ -840,13 +908,11 @@ class TradeLogResource(Resource):
             result['image_urls'] = images
             return result
         except Exception as e:
+            print(f"❌ Trade log fetch error: {str(e)}")
             return {"error": f"Failed to fetch trade log: {str(e)}"}, 500
 
     @jwt_required()
     def put(self, log_id):
-        """
-        FIXED: Update TradeLog with proper date parsing
-        """
         user_id = int(get_jwt_identity())
         try:
             tl = TradeLog.query.filter_by(id=log_id, user_id=user_id).first()
@@ -855,9 +921,6 @@ class TradeLogResource(Resource):
 
             data, has_files = extract_request_data()
 
-            print(f"📝 Updating Trade Log: ID={log_id}, Has Files: {has_files}")
-
-            # Handle image uploads
             if has_files:
                 uploaded_files = request.files.getlist('images')
                 urls = []
@@ -869,14 +932,11 @@ class TradeLogResource(Resource):
                 if urls:
                     existing = tl.images or []
                     data['images'] = existing + urls
-                    print(f"✅ Images uploaded: {len(urls)}, Total: {len(data['images'])}")
 
-            # Remove protected fields
             data.pop('user_id', None)
             data.pop('id', None)
             data.pop('created_at', None)
 
-            # Convert data types and parse dates
             processed_data = {}
             for key, value in data.items():
                 if key in ['entry_price', 'exit_price']:
@@ -885,22 +945,25 @@ class TradeLogResource(Resource):
                     processed_data[key] = int(value) if value else None
                 elif key in ['entry_date', 'exit_date']:
                     processed_data[key] = parse_datetime(value)
-                    print(f"   ✓ Parsed {key}: {value} -> {processed_data[key]}")
                 else:
                     processed_data[key] = value
 
-            # Update fields
             for k, v in processed_data.items():
                 if hasattr(tl, k) and k not in ['id', 'user_id', 'created_at']:
                     setattr(tl, k, v)
-                    print(f"   ✓ Set {k}: {v}")
 
-            # Calculate P&L
             tl.profit_loss = compute_pnl(tl.entry_price, tl.exit_price, tl.quantity, "Long")
-            print(f"💰 Trade Log P&L calculated: {tl.profit_loss}")
 
             db.session.commit()
-            print(f"✅ Trade Log updated successfully: ID={log_id}")
+
+            NotificationService.create_notification(
+                user_id=user_id,
+                title="Trade Log Updated 📝",
+                message=f"Trade log for {tl.symbol} has been updated.",
+                notification_type="trade",
+                link=f"/trade-logs/{tl.id}",
+                data={"trade_log_id": tl.id, "symbol": tl.symbol}
+            )
 
             result = trade_log_schema.dump(tl)
             images = result.get('images') or []
@@ -922,8 +985,18 @@ class TradeLogResource(Resource):
             if not tl:
                 return {"error": "Trade log not found"}, 404
 
+            symbol = tl.symbol
             db.session.delete(tl)
             db.session.commit()
+
+            NotificationService.create_notification(
+                user_id=user_id,
+                title="Trade Log Deleted 🗑️",
+                message=f"Trade log for {symbol} has been deleted.",
+                notification_type="trade",
+                link="/trade-logs"
+            )
+
             return {"message": "Trade log deleted successfully"}, 200
         except Exception as e:
             db.session.rollback()
@@ -932,108 +1005,12 @@ class TradeLogResource(Resource):
 
 
 # ========================
-# STRATEGY WISE TRADES
-# ========================
-
-class StrategyWiseTradesResource(Resource):
-    @jwt_required()
-    def get(self):
-        user_id = int(get_jwt_identity())
-        try:
-            page, per_page, search, sort_by, sort_order = get_pagination_params()
-            trade_logs_query = TradeLog.query.filter_by(user_id=user_id)
-
-            if search:
-                trade_logs_query = trade_logs_query.filter(
-                    or_(
-                        TradeLog.symbol.ilike(f'%{search}%'),
-                        TradeLog.trading_strategy.ilike(f'%{search}%')
-                    )
-                )
-
-            trade_logs = trade_logs_query.all()
-            strategy_trades = {}
-
-            for trade_log in trade_logs:
-                strategy_name = trade_log.trading_strategy or "No Strategy"
-                if strategy_name not in strategy_trades:
-                    strategy_trades[strategy_name] = {
-                        "strategy_name": strategy_name,
-                        "total_trades": 0,
-                        "success_trades": 0,
-                        "loss_trades": 0,
-                        "breakeven_trades": 0,
-                        "total_pnl": 0.0,
-                        "trades": []
-                    }
-
-                pnl = float(trade_log.profit_loss) if getattr(trade_log, 'profit_loss', None) is not None else 0.0
-                if pnl > 0:
-                    strategy_trades[strategy_name]["success_trades"] += 1
-                    result = "success"
-                elif pnl < 0:
-                    strategy_trades[strategy_name]["loss_trades"] += 1
-                    result = "loss"
-                else:
-                    strategy_trades[strategy_name]["breakeven_trades"] += 1
-                    result = "breakeven"
-
-                strategy_trades[strategy_name]["total_trades"] += 1
-                strategy_trades[strategy_name]["total_pnl"] += pnl
-
-                images = getattr(trade_log, 'images', []) or []
-                trade_detail = {
-                    "id": trade_log.id,
-                    "symbol": trade_log.symbol,
-                    "entry_price": trade_log.entry_price,
-                    "exit_price": trade_log.exit_price,
-                    "quantity": trade_log.quantity,
-                    "pnl": pnl,
-                    "result": result,
-                    "image_urls": images
-                }
-                strategy_trades[strategy_name]["trades"].append(trade_detail)
-
-            result_list = []
-            for strategy_data in strategy_trades.values():
-                total = strategy_data["total_trades"]
-                strategy_data["win_rate"] = round((strategy_data["success_trades"] / total) * 100,
-                                                  2) if total > 0 else 0.0
-                strategy_data["loss_rate"] = round((strategy_data["loss_trades"] / total) * 100,
-                                                   2) if total > 0 else 0.0
-                result_list.append(strategy_data)
-
-            result_list.sort(key=lambda x: x["total_trades"], reverse=True)
-
-            total_strategies = len(result_list)
-            start_idx = (page - 1) * per_page
-            end_idx = start_idx + per_page
-            paginated_strategies = result_list[start_idx:end_idx]
-            total_pages = (total_strategies + per_page - 1) // per_page
-
-            return {
-                'items': paginated_strategies,
-                'pagination': {
-                    'page': page,
-                    'per_page': per_page,
-                    'total': total_strategies,
-                    'pages': total_pages,
-                    'has_prev': page > 1,
-                    'has_next': page < total_pages,
-                    'prev_num': page - 1 if page > 1 else None,
-                    'next_num': page + 1 if page < total_pages else None
-                }
-            }, 200
-        except Exception as e:
-            print(f"❌ Error fetching strategy-wise trades: {str(e)}")
-            return {"error": f"Failed to fetch strategy-wise trades: {str(e)}"}, 500
-
-
-# ========================
-# STATS RESOURCE
+# STATS RESOURCE - CRITICAL FOR DASHBOARD
 # ========================
 
 class TradeLogStatsResource(Resource):
+    """Stats endpoint that matches frontend call: /api/trade-logs/stats"""
+
     @jwt_required()
     def get(self):
         user_id = int(get_jwt_identity())
@@ -1046,60 +1023,84 @@ class TradeLogStatsResource(Resource):
             success = sum(1 for t in items if get_pnl(t) > 0)
             loss = sum(1 for t in items if get_pnl(t) < 0)
             breakeven = sum(1 for t in items if get_pnl(t) == 0)
+
             total = len(items)
+            win_rate = round((success / total) * 100, 2) if total > 0 else 0.0
+            loss_rate = round((loss / total) * 100, 2) if total > 0 else 0.0
+
             total_pnl = sum(get_pnl(t) for t in items)
-            win_rate = (success / total) * 100.0 if total else 0.0
-            loss_rate = (loss / total) * 100.0 if total else 0.0
+            avg_pnl = round(total_pnl / total, 2) if total > 0 else 0.0
+
+            best_trade = max((get_pnl(t) for t in items), default=0.0)
+            worst_trade = min((get_pnl(t) for t in items), default=0.0)
 
             return {
-                "counts": {
-                    "success": success,
-                    "loss": loss,
-                    "breakeven": breakeven
+                'performance': {
+                    'total_trades': total,
+                    'win_rate': win_rate,
+                    'total_pnl': round(total_pnl, 2),
+                    'avg_pnl': avg_pnl,
+                    'best_trade': round(best_trade, 2),
+                    'worst_trade': round(worst_trade, 2)
                 },
-                "performance": {
-                    "total_trades": total,
-                    "win_rate": round(win_rate, 2),
-                    "loss_rate": round(loss_rate, 2),
-                    "total_pnl": total_pnl
+                'counts': {
+                    'success': success,
+                    'loss': loss,
+                    'breakeven': breakeven
                 }
             }, 200
         except Exception as e:
             print(f"❌ Error fetching stats: {str(e)}")
-            return {"error": f"Failed to fetch trade log stats: {str(e)}"}, 500
+            return {"error": f"Failed to fetch stats: {str(e)}"}, 500
 
 
 # ========================
-# REGISTER RESOURCES
+# REGISTER ALL RESOURCES
 # ========================
 
 def register_resources(api):
     """Register all API resources"""
-    print(">>> Registering API resources...")
+    from .notification_resources import (
+        NotificationListResource, NotificationResource, MarkAllReadResource,
+        UnreadCountResource, PushSubscriptionResource, TestNotificationResource
+    )
+
+    print("🔧 Registering API resources...")
 
     # Auth
-    api.add_resource(UserRegisterResource, "/api/auth/register")
-    api.add_resource(UserLoginResource, "/api/auth/login")
-    api.add_resource(UserProfileResource, "/api/auth/profile")
+    api.add_resource(UserRegisterResource, '/api/auth/register')
+    api.add_resource(UserLoginResource, '/api/auth/login')
+    api.add_resource(UserProfileResource, '/api/auth/profile')
+    print("  ✓ Auth endpoints registered")
 
     # Strategies
     api.add_resource(StrategyListResource, '/api/strategies')
     api.add_resource(StrategyResource, '/api/strategies/<int:strategy_id>')
+    print("  ✓ Strategy endpoints registered")
 
     # Analyses
     api.add_resource(AnalysisListResource, '/api/analyses')
     api.add_resource(AnalysisResource, '/api/analyses/<int:analysis_id>')
+    print("  ✓ Analysis endpoints registered")
 
     # Trades
     api.add_resource(TradeListResource, '/api/trades')
     api.add_resource(TradeResource, '/api/trades/<int:trade_id>')
+    print("  ✓ Trade endpoints registered")
 
-    # Trade Logs - FIXED
+    # Trade Logs - CRITICAL: Register stats BEFORE dynamic route
+    api.add_resource(TradeLogStatsResource, '/api/trade-logs/stats')
     api.add_resource(TradeLogListResource, '/api/trade-logs')
     api.add_resource(TradeLogResource, '/api/trade-logs/<int:log_id>')
-    api.add_resource(TradeLogStatsResource, '/api/trade-logs/stats')
+    print("  ✓ Trade Log endpoints registered (including /stats)")
 
-    # Strategy-wise trades
-    api.add_resource(StrategyWiseTradesResource, '/api/strategy-wise-trades')
+    # Notifications
+    api.add_resource(NotificationListResource, '/api/notifications')
+    api.add_resource(NotificationResource, '/api/notifications/<int:notification_id>')
+    api.add_resource(MarkAllReadResource, '/api/notifications/mark-all-read')
+    api.add_resource(UnreadCountResource, '/api/notifications/unread-count')
+    api.add_resource(PushSubscriptionResource, '/api/notifications/subscribe')
+    api.add_resource(TestNotificationResource, '/api/notifications/test')
+    print("  ✓ Notification endpoints registered")
 
-    print(">>> API resources registered successfully!")
+    print("✅ All API resources registered successfully\n")

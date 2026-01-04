@@ -29,14 +29,59 @@ class User(db.Model, TimestampMixin):
     avatar_url = db.Column(db.String(512), nullable=True)  # Cloudinary URL
     location = db.Column(db.String(120), nullable=True)
 
+    # Push notification subscription
+    push_subscription = db.Column(JSON, nullable=True)
+
     # Relationships
     strategies = db.relationship('Strategy', backref='user', lazy=True, cascade="all, delete-orphan")
     analyses = db.relationship('Analysis', backref='user', lazy=True, cascade="all, delete-orphan")
     trades = db.relationship('Trade', backref='user', lazy=True, cascade="all, delete-orphan")
     trade_logs = db.relationship('TradeLog', backref='user', lazy=True, cascade="all, delete-orphan")
+    notifications = db.relationship('Notification', backref='user', lazy=True, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f'<User {self.email}>'
+
+
+# ---------------------------
+# Notification Model
+# ---------------------------
+class Notification(db.Model, TimestampMixin):
+    __tablename__ = 'notifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+
+    title = db.Column(db.String(128), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    type = db.Column(
+        Enum("trade", "analysis", "strategy", "system", "alert", name="notification_type"),
+        nullable=False,
+        default="system"
+    )
+    link = db.Column(db.String(256), nullable=True)  # Link to related resource
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
+
+    # Metadata
+    data = db.Column(JSON, nullable=True)  # Additional data
+
+    def __repr__(self):
+        return f'<Notification {self.id}: {self.title}>'
+
+    def to_dict(self):
+        """Convert notification to dictionary"""
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'title': self.title,
+            'message': self.message,
+            'type': self.type,
+            'link': self.link,
+            'is_read': self.is_read,
+            'data': self.data,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
 
 
 # ---------------------------
