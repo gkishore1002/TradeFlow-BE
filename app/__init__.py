@@ -38,6 +38,11 @@ def create_app(config_object=None):
                       logger=True,
                       engineio_logger=False)
 
+    # Import socket handlers to register them
+    with app.app_context():
+        from . import socket_handlers
+        print("✅ SocketIO handlers registered")
+
     # ⭐ CRITICAL: Create Api instance HERE
     api = Api(app)
 
