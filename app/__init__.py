@@ -129,7 +129,7 @@ def create_app(config_object=None):
             'message': 'Backend is running',
             'database': 'connected',
             'cors': 'enabled',
-            'version': '2.0.0'
+            'version': '2.0.1'
         }, 200
 
     @app.route('/')
