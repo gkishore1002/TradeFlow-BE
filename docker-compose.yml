@@ -1,12 +1,20 @@
-version: '3.8'
 services:
-  web:
+
+  tradeflow:
+
     build: .
+
+    container_name: tradeflow-backend
+
     ports:
-      - "8000:8000"
+      - "5000:5000"
+
     volumes:
       - .:/app
-    environment:
-      - FLASK_ENV=development
-      - DATABASE_URL=sqlite:///data.db
-      - UPLOAD_FOLDER=/app/uploads
+
+    env_file:
+      - .env
+
+    restart: unless-stopped
+
+    command: python run.py
